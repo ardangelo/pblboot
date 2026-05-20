@@ -41,6 +41,13 @@ config PB_FIRMWARE_NRF52
 	  Boot the firmware image directly from the internal-flash firmware
 	  partition instead of selecting XIP slots from external flash.
 
+
+config PB_FIRMWARE_NRF52_STAGED_UPDATE
+	bool "Enable staged external-flash updates for NRF52 firmware"
+	depends on PB_FIRMWARE_NRF52
+	help
+	  Validate pblboot-headered firmware images in external flash and copy
+	  verified payloads into the fixed internal NRF52 firmware partition.
 config PB_VBAT_MIN_BOOT_MV
 	int "Minimal battery level to allow boot (mV)"
 	default 3300

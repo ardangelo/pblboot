@@ -107,14 +107,14 @@
 };
 
 &qspi {
-	status = "disabled";
+	status = "okay";
 	pinctrl-0 = <&qspi_default>;
 	pinctrl-1 = <&qspi_sleep>;
 	pinctrl-names = "default", "sleep";
 
 	w25q256jw: memory@0 {
 		compatible = "nordic,qspi-nor";
-		status = "disabled";
+		status = "okay";
 		reg = <0>;
 		writeoc = "pp4o";
 		readoc = "read4io";
@@ -127,6 +127,27 @@
 		has-dpd;
 		t-enter-dpd = <3000>;
 		t-exit-dpd = <20000>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			safe_firmware_partition: partition@0 {
+				label = "safe-firmware";
+				reg = <0x00000000 DT_SIZE_K(512)>;
+			};
+
+			firmware_scratch_partition: partition@80000 {
+				label = "firmware-scratch";
+				reg = <0x00080000 DT_SIZE_K(1024)>;
+			};
+
+			prf_partition: partition@180000 {
+				label = "prf";
+				reg = <0x00180000 DT_SIZE_K(512)>;
+			};
+		};
 	};
 };
 
