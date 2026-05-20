@@ -1,0 +1,148 @@
+/*
+ * Copyright (c) 2026 Core Devices LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <nordic/nrf52840_qiaa.dtsi>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+#include "cyberdeck-pinctrl.dtsi"
+
+/ {
+	model = "Core Devices Cyberdeck";
+	compatible = "coredevices,cyberdeck";
+
+	chosen {
+		zephyr,flash = &flash0;
+		zephyr,flash-controller = &flash_controller;
+		zephyr,code-partition = &firmware_partition;
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+
+		pb,firmware = &firmware_partition;
+		pb,btn-back = &btn_back;
+		pb,btn-up = &btn_up;
+		pb,btn-center = &btn_center;
+		pb,btn-down = &btn_down;
+		pb,wdt = &wdt0;
+	};
+
+	buttons: buttons {
+		compatible = "gpio-keys";
+
+		/* END CALL key, used for bootloader entry decisions in later stages. */
+		btn_back: button-back {
+			gpios = <&gpio0 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			label = "BACK/END";
+			zephyr,code = <INPUT_KEY_BACK>;
+		};
+
+		btn_up: button-up {
+			gpios = <&gpio1 1 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			label = "UP";
+			zephyr,code = <INPUT_KEY_UP>;
+		};
+
+		btn_center: button-center {
+			gpios = <&gpio1 2 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			label = "CENTER";
+			zephyr,code = <INPUT_KEY_ENTER>;
+		};
+
+		btn_down: button-down {
+			gpios = <&gpio1 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+			label = "DOWN";
+			zephyr,code = <INPUT_KEY_DOWN>;
+		};
+	};
+
+	display {
+		status = "disabled";
+	};
+
+	neopixel {
+		status = "disabled";
+	};
+
+	aliases {
+		sw0 = &btn_back;
+		sw1 = &btn_up;
+		sw2 = &btn_center;
+		sw3 = &btn_down;
+		watchdog0 = &wdt0;
+	};
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "boot";
+			reg = <0x00000000 DT_SIZE_K(32)>;
+		};
+
+		firmware_partition: partition@8000 {
+			label = "firmware";
+			reg = <0x00008000 0x000f8000>;
+		};
+	};
+};
+
+&gpiote {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&qspi {
+	status = "disabled";
+	pinctrl-0 = <&qspi_default>;
+	pinctrl-1 = <&qspi_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	w25q256jw: memory@0 {
+		compatible = "nordic,qspi-nor";
+		status = "disabled";
+		reg = <0>;
+		writeoc = "pp4o";
+		readoc = "read4io";
+		sck-frequency = <8000000>;
+		quad-enable-requirements = "S2B1v6";
+		address-size-32;
+		enter-4byte-addr = <0xb7>;
+		jedec-id = [ef 60 19];
+		size = <DT_SIZE_M(256)>;
+		has-dpd;
+		t-enter-dpd = <3000>;
+		t-exit-dpd = <20000>;
+	};
+};
+
+&uart0 {
+	compatible = "nordic,nrf-uarte";
+	status = "okay";
+	current-speed = <1000000>;
+	pinctrl-0 = <&uart0_default>;
+	pinctrl-1 = <&uart0_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+&usbd {
+	status = "disabled";
+};
+
+&wdt0 {
+	status = "okay";
+};

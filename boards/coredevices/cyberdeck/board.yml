@@ -1,0 +1,9 @@
+# Copyright (c) 2026 Core Devices LLC
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: cyberdeck
+  full_name: Cyberdeck
+  vendor: coredevices
+  socs:
+    - name: nrf52840

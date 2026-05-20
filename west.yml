@@ -14,3 +14,4 @@ manifest:
         name-allowlist:
           - cmsis_6
           - hal_sifli
+          - hal_nordic

@@ -21,6 +21,9 @@
 
 LOG_MODULE_DECLARE(pblboot, CONFIG_PBLBOOT_LOG_LEVEL);
 
+#ifdef CONFIG_PB_FIRMWARE_NRF52
+#define FIRMWARE_ADDR DT_REG_ADDR(DT_CHOSEN(pb_firmware))
+#else
 #define SLOT0_ADDR DT_REG_ADDR(DT_CHOSEN(pb_slot0))
 #define SLOT1_ADDR DT_REG_ADDR(DT_CHOSEN(pb_slot1))
 #define PRF_ADDR   DT_REG_ADDR(DT_CHOSEN(pb_prf))
@@ -86,19 +89,27 @@ static int firmware_validate(uint32_t address, const struct firmware_header *hdr
 
 	return 0;
 }
+#endif /* CONFIG_PB_FIRMWARE_NRF52 */
 
 int pb_firmware_init(void)
 {
+#ifdef CONFIG_PB_FIRMWARE_NRF52
+	return 0;
+#else
 	if (!device_is_ready(flash)) {
 		LOG_ERR("Flash device not ready");
 		return -ENODEV;
 	}
 
 	return 0;
+#endif /* CONFIG_PB_FIRMWARE_NRF52 */
 }
 
 int pb_firmware_load_prf(void)
 {
+#ifdef CONFIG_PB_FIRMWARE_NRF52
+	return -ENOTSUP;
+#else
 	uint32_t prf_load_address;
 	struct firmware_header hdr;
 	int ret;
@@ -122,10 +133,19 @@ int pb_firmware_load_prf(void)
 	pb_fwjump(prf_load_address);
 
 	return 0;
+#endif /* CONFIG_PB_FIRMWARE_NRF52 */
 }
 
 int pb_firmware_load(void)
 {
+#ifdef CONFIG_PB_FIRMWARE_NRF52
+	uint32_t firmware_load_address = CONFIG_FLASH_BASE_ADDRESS + FIRMWARE_ADDR;
+
+	LOG_INF("Loading firmware @ 0x%" PRIx32, firmware_load_address);
+	pb_fwjump(firmware_load_address);
+
+	return 0;
+#else
 	struct firmware_header slot0_hdr;
 	struct firmware_header slot1_hdr;
 	uint32_t slot0_load_address = 0U;
@@ -180,4 +200,5 @@ int pb_firmware_load(void)
 		LOG_ERR("No valid firmware image");
 		return pb_firmware_load_prf();
 	}
+#endif /* CONFIG_PB_FIRMWARE_NRF52 */
 }

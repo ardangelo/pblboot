@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Core Devices LLC
+# SPDX-License-Identifier: Apache-2.0
+
+identifier: cyberdeck/nrf52840
+name: Cyberdeck
+vendor: coredevices
+type: mcu
+arch: arm
+ram: 255
+flash: 1024
+toolchain:
+  - zephyr
+supported:
+  - gpio
+  - watchdog

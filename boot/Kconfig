@@ -34,6 +34,13 @@ config PB_CHARGER
 	help
 	  Enable support for the battery charger.
 
+config PB_FIRMWARE_NRF52
+	bool "Boot fixed internal NRF52 firmware image"
+	depends on SOC_SERIES_NRF52X
+	help
+	  Boot the firmware image directly from the internal-flash firmware
+	  partition instead of selecting XIP slots from external flash.
+
 config PB_VBAT_MIN_BOOT_MV
 	int "Minimal battery level to allow boot (mV)"
 	default 3300

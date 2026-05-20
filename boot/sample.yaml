@@ -9,5 +9,6 @@ common:
   integration_platforms:
     - pt2
     - pr2
+    - cyberdeck/nrf52840
 tests:
   boot.default: {}

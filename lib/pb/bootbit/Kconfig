@@ -20,4 +20,11 @@ config PB_BOOTBIT_SF32LB
     help
       Enable boot bit SF32LB backend.
 
+config PB_BOOTBIT_NRF52
+    bool "Boot bit NRF52 retained RAM backend"
+    default y if SOC_SERIES_NRF52X
+    depends on SOC_SERIES_NRF52X
+    help
+      Enable boot bit NRF52 retained RAM backend.
+
 endif # BOOTBIT
