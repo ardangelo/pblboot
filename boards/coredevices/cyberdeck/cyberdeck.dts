@@ -160,8 +160,9 @@
 	pinctrl-names = "default", "sleep";
 };
 
-&usbd {
-	status = "disabled";
+zephyr_udc0: &usbd {
+	compatible = "nordic,nrf-usbd";
+	status = "okay";
 };
 
 &wdt0 {

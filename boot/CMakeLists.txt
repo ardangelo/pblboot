@@ -24,4 +24,8 @@ if(CONFIG_PB_CHARGER)
   target_sources(app PRIVATE src/charger.c)
 endif()
 
+if(CONFIG_PB_USB_DFU)
+  target_sources(app PRIVATE src/usb_dfu.c)
+endif()
+
 zephyr_linker_sources(SECTIONS version.ld)

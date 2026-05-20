@@ -54,6 +54,8 @@ enum pb_bootbit {
 	PB_BOOTBIT_FORCE_PRF = 17,
 	/** New PRF is available for installation */
 	PB_BOOTBIT_NEW_PRF_AVAILABLE = 18,
+	/** Force entry into USB DFU */
+	PB_BOOTBIT_FORCE_DFU = 20,
 };
 
 /**
@@ -270,6 +272,24 @@ static inline bool pb_bootbit_force_prf_tst_and_clr(void)
 	ret = pb_bootbit_tst(PB_BOOTBIT_FORCE_PRF);
 	if (ret) {
 		pb_bootbit_clr(PB_BOOTBIT_FORCE_PRF);
+	}
+
+	return ret;
+}
+
+/**
+ * @brief Check if USB DFU is forced and clear the flag
+ *
+ * @retval true if USB DFU was forced
+ * @retval false if USB DFU was not forced
+ */
+static inline bool pb_bootbit_force_dfu_tst_and_clr(void)
+{
+	bool ret;
+
+	ret = pb_bootbit_tst(PB_BOOTBIT_FORCE_DFU);
+	if (ret) {
+		pb_bootbit_clr(PB_BOOTBIT_FORCE_DFU);
 	}
 
 	return ret;

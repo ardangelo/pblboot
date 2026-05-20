@@ -25,6 +25,11 @@ static inline bool buttons_prf_pressed(void)
 	       (gpio_pin_get_dt(&btn_center) == 1) && (gpio_pin_get_dt(&btn_down) == 0);
 }
 
+static inline bool button_dfu_pressed(void)
+{
+	return gpio_pin_get_dt(&btn_back) == 1;
+}
+
 int pb_buttons_init(void)
 {
 	int ret;
@@ -75,6 +80,25 @@ bool pb_buttons_prf_requested(void)
 		k_msleep(1);
 		if (!buttons_prf_pressed()) {
 			LOG_INF("Button combo released");
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool pb_buttons_dfu_requested(void)
+{
+	if (!button_dfu_pressed()) {
+		return false;
+	}
+
+	LOG_INF("DFU button detected, waiting %d ms to confirm", CONFIG_PB_DFU_BUTTON_TIME_MS);
+
+	for (unsigned int i = 0U; i < CONFIG_PB_DFU_BUTTON_TIME_MS; i++) {
+		k_msleep(1);
+		if (!button_dfu_pressed()) {
+			LOG_INF("DFU button released");
 			return false;
 		}
 	}

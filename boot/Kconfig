@@ -22,6 +22,41 @@ config PB_PRF_BUTTON_COMBO_TIME_MS
 	  Time in milliseconds that the PRF button combo must be held to trigger
 	  a PRF load.
 
+config PB_DFU_BUTTON_TIME_MS
+	int "USB DFU button hold time (ms)"
+	default 1000
+	help
+	  Time in milliseconds that END CALL must be held to trigger USB DFU.
+
+config PB_USB_DFU
+	bool "Enable Cyberdeck USB DFU"
+	depends on PB_FIRMWARE_NRF52_STAGED_UPDATE
+	depends on USB_DEVICE_STACK
+	help
+	  Enable USB DFU that writes pblboot-headered payloads to external
+	  firmware scratch and requests installation on reboot.
+
+config PB_USB_DFU_POLLTIMEOUT_MS
+	int "USB DFU poll timeout (ms)"
+	default 50
+	depends on PB_USB_DFU
+	help
+	  Timeout reported to the host for flash writes and erases.
+
+config PB_USB_DFU_IDLE_TIMEOUT_MS
+	int "USB DFU idle timeout (ms)"
+	default 60000
+	depends on PB_USB_DFU
+	help
+	  Time to wait in USB DFU before a host starts a transfer.
+
+config PB_USB_DFU_TRANSFER_TIMEOUT_MS
+	int "USB DFU transfer timeout (ms)"
+	default 300000
+	depends on PB_USB_DFU
+	help
+	  Time to wait for additional USB DFU activity once a transfer starts.
+
 config PB_WATCHDOG_TIMEOUT_MS
 	int "Watchdog timeout (ms)"
 	default 10000

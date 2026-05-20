@@ -61,6 +61,8 @@ static const char *bootbit_str(enum pb_bootbit bit)
 		return "FORCE_PRF";
 	case PB_BOOTBIT_NEW_PRF_AVAILABLE:
 		return "NEW_PRF_AVAILABLE";
+	case PB_BOOTBIT_FORCE_DFU:
+		return "FORCE_DFU";
 	default:
 		return "UNKNOWN";
 	}

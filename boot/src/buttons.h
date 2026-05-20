@@ -34,6 +34,14 @@ int pb_buttons_init(void);
 bool pb_buttons_prf_requested(void);
 
 /**
+ * @brief Check if USB DFU was requested with the END CALL button
+ *
+ * @retval true if USB DFU mode was requested
+ * @retval false if USB DFU mode was not requested
+ */
+bool pb_buttons_dfu_requested(void);
+
+/**
  * @brief Check if any button is currently pressed
  *
  * @retval true if any button is pressed

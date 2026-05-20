@@ -8,6 +8,7 @@
 #include "firmware.h"
 #include "panic.h"
 #include "watchdog.h"
+#include "usb_dfu.h"
 
 #include <inttypes.h>
 
@@ -56,6 +57,16 @@ int main(void)
 		LOG_ERR("Failed to initialize firmware module (err %d)", ret);
 		pb_panic(PB_PANIC_REASON_INIT_FAIL);
 	}
+
+#ifdef CONFIG_PB_USB_DFU
+	if (pb_usb_dfu_requested()) {
+		ret = pb_usb_dfu_run();
+		if (ret < 0) {
+			LOG_ERR("USB DFU failed (err %d)", ret);
+			pb_panic(PB_PANIC_REASON_INIT_FAIL);
+		}
+	}
+#endif /* CONFIG_PB_USB_DFU */
 
 #ifdef CONFIG_PB_CHARGER
 	/* check battery/plugged in status to allow booting or not */
