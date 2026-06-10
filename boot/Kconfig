@@ -63,6 +63,16 @@ config PB_WATCHDOG_TIMEOUT_MS
 	help
 	  Timeout in milliseconds for the watchdog timer.
 
+config PB_WATCHDOG_AUTOSTART
+	bool "Start the watchdog during early boot"
+	default y
+	help
+	  Start the watchdog in pb_watchdog_init(). Disable on SoCs whose
+	  watchdog cannot be stopped once started (e.g. nRF52) and whose firmware
+	  does not adopt and feed a bootloader-started watchdog in time: starting
+	  it would hand firmware a running watchdog it cannot keep fed, causing a
+	  reset loop. When disabled the watchdog is installed but left stopped.
+
 config PB_CHARGER
 	bool "Enable charger support"
 	default y

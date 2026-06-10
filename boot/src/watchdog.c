@@ -49,10 +49,20 @@ int pb_watchdog_init(void)
 		return ret;
 	}
 
-	ret = wdt_setup(wdt, 0U);
-	if (ret < 0) {
-		LOG_ERR("Failed to setup WDT (%d)", ret);
-		return ret;
+	/*
+	 * Starting the watchdog is gated by CONFIG_PB_WATCHDOG_AUTOSTART. On SoCs
+	 * whose watchdog cannot be stopped once started (e.g. nRF52) and whose
+	 * firmware does not adopt/feed a watchdog the bootloader started, starting
+	 * it here hands firmware a running watchdog it cannot keep fed, causing a
+	 * reset loop. Such targets disable autostart so the firmware owns the
+	 * watchdog (or runs without one).
+	 */
+	if (IS_ENABLED(CONFIG_PB_WATCHDOG_AUTOSTART)) {
+		ret = wdt_setup(wdt, 0U);
+		if (ret < 0) {
+			LOG_ERR("Failed to setup WDT (%d)", ret);
+			return ret;
+		}
 	}
 
 	return 0;
