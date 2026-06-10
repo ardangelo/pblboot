@@ -84,12 +84,12 @@
 
 		boot_partition: partition@0 {
 			label = "boot";
-			reg = <0x00000000 DT_SIZE_K(48)>;
+			reg = <0x00000000 DT_SIZE_K(32)>;
 		};
 
-		firmware_partition: partition@c000 {
+		firmware_partition: partition@8000 {
 			label = "firmware";
-			reg = <0x0000c000 0x000f4000>;
+			reg = <0x00008000 0x000f8000>;
 		};
 	};
 };
