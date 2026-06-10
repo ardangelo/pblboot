@@ -54,6 +54,11 @@ void FUNC_NORETURN pb_fwjump(uintptr_t addr)
 	/* reset CONTROL */
 	__set_CONTROL(0U);
 
+	/* Relocate the vector table to the image base so that any exception or
+	 * IRQ taken before the image installs its own VTOR is dispatched through
+	 * the image's vector table rather than the bootloader's. */
+	SCB->VTOR = (uint32_t)addr;
+
 	/* reset PRIMASK/FAULTMASK */
 	__enable_irq();
 	__enable_fault_irq();
