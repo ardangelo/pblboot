@@ -31,8 +31,14 @@ int pb_watchdog_init(void)
 		return -ENODEV;
 	}
 
+	/*
+	 * Some SoCs (e.g. nRF52) cannot stop a watchdog once it has been
+	 * started, so wdt_disable() always reports -EPERM/-ENOTSUP. That is not
+	 * fatal here: proceed to (re)install the timeout and rely on wdt_setup()
+	 * below. Only genuine errors abort initialization.
+	 */
 	ret = wdt_disable(wdt);
-	if (ret < 0) {
+	if ((ret < 0) && (ret != -EPERM) && (ret != -ENOTSUP)) {
 		LOG_ERR("Failed to disable WDT (%d)", ret);
 		return ret;
 	}
