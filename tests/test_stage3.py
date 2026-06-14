@@ -74,6 +74,32 @@ def test_dfu_entry_sources_are_wired_before_update_flow():
     assert main.index("pb_usb_dfu_requested()") < main.index("pb_bootbit_force_prf_tst_and_clr()")
 
 
+def test_dfu_uses_tinyusb_without_zephyr_usb_stack():
+    kconfig = (ROOT / "boot/Kconfig").read_text()
+    board_conf = (ROOT / "boot/boards/cyberdeck.conf").read_text()
+    cmake = (ROOT / "boot/CMakeLists.txt").read_text()
+    usb_dfu = (ROOT / "boot/src/usb_dfu.c").read_text()
+
+    assert "PB_USB_DFU_TINYUSB" not in kconfig + board_conf + cmake + usb_dfu
+    assert "depends on USB_DEVICE_STACK" not in kconfig
+    assert "CONFIG_PB_USB_DFU=y" in board_conf
+    assert "CONFIG_SENSOR=n" in board_conf
+    assert "../third_party/tinyusb" in cmake
+    assert "tud_dfu_download_cb" in usb_dfu
+    assert "tud_dfu_manifest_cb" in usb_dfu
+    assert "zephyr/usb" not in usb_dfu
+
+
+def test_dfu_descriptors_match_cyberdeck_bootloader_identity():
+    usb_dfu = (ROOT / "boot/src/usb_dfu.c").read_text()
+
+    assert ".idVendor = 0xcafe" in usb_dfu
+    assert ".idProduct = 0x4002" in usb_dfu
+    assert '"Core Devices"' in usb_dfu
+    assert '"Cyberdeck Bootloader DFU"' in usb_dfu
+    assert "DFU_ATTR_CAN_DOWNLOAD" in usb_dfu
+
+
 def test_dfu_writes_payload_to_scratch_without_description_header():
     dfu = DfuScratch()
     block0 = bytes(range(DFU_XFER_SIZE))

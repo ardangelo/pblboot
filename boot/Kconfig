@@ -29,12 +29,12 @@ config PB_DFU_BUTTON_TIME_MS
 	  Time in milliseconds that END CALL must be held to trigger USB DFU.
 
 config PB_USB_DFU
-	bool "Enable Cyberdeck USB DFU"
+	bool "Enable Cyberdeck TinyUSB DFU"
 	depends on PB_FIRMWARE_NRF52_STAGED_UPDATE
-	depends on USB_DEVICE_STACK
+	depends on SOC_SERIES_NRF52X
 	help
-	  Enable USB DFU that writes pblboot-headered payloads to external
-	  firmware scratch and requests installation on reboot.
+	  Enable TinyUSB DFU that writes pblboot-headered payloads to
+	  external firmware scratch and requests installation on reboot.
 
 config PB_USB_DFU_POLLTIMEOUT_MS
 	int "USB DFU poll timeout (ms)"

@@ -28,4 +28,8 @@ if(CONFIG_PB_USB_DFU)
   target_sources(app PRIVATE src/usb_dfu.c)
 endif()
 
+if(CONFIG_PB_USB_DFU)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/tinyusb tinyusb)
+endif()
+
 zephyr_linker_sources(SECTIONS version.ld)

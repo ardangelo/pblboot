@@ -1,0 +1,3 @@
+[submodule "third_party/tinyusb/tinyusb"]
+	path = third_party/tinyusb/tinyusb
+	url = https://github.com/jplexer/tinyusb.git
