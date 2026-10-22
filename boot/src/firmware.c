@@ -22,6 +22,7 @@
 
 LOG_MODULE_DECLARE(pblboot, CONFIG_PBLBOOT_LOG_LEVEL);
 
+#ifndef CONFIG_PB_FIRMWARE_NRF52
 #define PBLBOOT_MAGIC 0x96f3b83dUL
 
 struct firmware_header {
@@ -32,7 +33,7 @@ struct firmware_header {
 	uint32_t length;
 	uint32_t crc;
 } __packed;
-
+#endif
 #ifdef CONFIG_PB_FIRMWARE_NRF52
 #define FIRMWARE_ADDR DT_REG_ADDR(DT_CHOSEN(pb_firmware))
 #define FIRMWARE_SIZE DT_REG_SIZE(DT_CHOSEN(pb_firmware))
@@ -45,12 +46,34 @@ struct firmware_header {
 #define SCRATCH_SIZE DT_REG_SIZE(DT_CHOSEN(pb_firmware_scratch))
 #define SAFE_FIRMWARE_ADDR DT_REG_ADDR(DT_CHOSEN(pb_safe_firmware))
 #define SAFE_FIRMWARE_SIZE DT_REG_SIZE(DT_CHOSEN(pb_safe_firmware))
-#define PRF_ADDR DT_REG_ADDR(DT_CHOSEN(pb_prf))
-#define PRF_SIZE DT_REG_SIZE(DT_CHOSEN(pb_prf))
+#define BOOT_STATE_ADDR DT_REG_ADDR(DT_CHOSEN(pb_boot_state))
+#define BOOT_STATE_SIZE DT_REG_SIZE(DT_CHOSEN(pb_boot_state))
+#define SRAM_ADDR DT_REG_ADDR(DT_NODELABEL(sram0))
+#define SRAM_SIZE DT_REG_SIZE(DT_NODELABEL(sram0))
 
+#define FIRMWARE_FOOTER_SIZE 67U
+#define FIRMWARE_MIN_SIZE (8U + FIRMWARE_FOOTER_SIZE)
+#define FIRMWARE_METADATA_VERSION 1U
+#define FIRMWARE_RECOVERY_FLAG 1U
+
+struct firmware_description {
+	uint32_t description_length;
+	uint32_t firmware_length;
+	uint32_t checksum;
+} __packed;
+
+struct staged_image {
+	struct firmware_description description;
+	bool is_recovery;
+};
+
+BUILD_ASSERT(sizeof(struct firmware_description) == 12);
+BUILD_ASSERT(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
+BUILD_ASSERT(CONFIG_PB_FIRMWARE_PLATFORM_ID != 0);
 BUILD_ASSERT(IS_POWER_OF_TWO(FIRMWARE_ERASE_SIZE));
 BUILD_ASSERT(IS_POWER_OF_TWO(FIRMWARE_WRITE_SIZE));
 BUILD_ASSERT((CONFIG_PB_FLASH_READ_BUF_SIZE % FIRMWARE_WRITE_SIZE) == 0);
+BUILD_ASSERT(FIRMWARE_ADDR == 0x8000 && FIRMWARE_SIZE == 0xf8000);
 
 static uint8_t buf[CONFIG_PB_FLASH_READ_BUF_SIZE];
 static const struct device *internal_flash = DEVICE_DT_GET(DT_CHOSEN(zephyr_flash_controller));
@@ -66,155 +89,167 @@ static int internal_read(uint32_t offset, void *dst, size_t len)
 	return flash_read(internal_flash, offset, dst, len);
 }
 
-static int firmware_header_get(uint32_t image_addr, struct firmware_header *hdr)
+static bool firmware_vectors_valid(const uint32_t vectors[2], uint32_t payload_size)
 {
+	uint32_t sp = vectors[0];
+	uint32_t reset = vectors[1];
+
+	return (sp >= SRAM_ADDR + 0x100U) && (sp <= SRAM_ADDR + SRAM_SIZE) &&
+	       ((sp & 7U) == 0U) && ((reset & 1U) != 0U) &&
+	       ((reset & ~1U) >= FIRMWARE_ADDR) &&
+	       ((reset & ~1U) - FIRMWARE_ADDR < payload_size);
+}
+
+static int firmware_validate_crc(uint32_t image_addr,
+				 const struct firmware_description *description)
+{
+	uint32_t pending = description->firmware_length;
+	uint32_t offset = sizeof(*description);
+	uint32_t crc = crc32_ieee(NULL, 0U);
 	int ret;
 
-	ret = staged_read(image_addr, 0U, hdr, sizeof(*hdr));
-	if (ret < 0) {
-		LOG_ERR("Failed to read staged firmware header (err %d)", ret);
-		return ret;
-	}
-
-	if (hdr->magic != PBLBOOT_MAGIC) {
-		LOG_WRN("Invalid staged firmware magic: 0x%08" PRIx32, hdr->magic);
-		return -EINVAL;
-	}
-
-	if (hdr->header_length != sizeof(*hdr)) {
-		LOG_WRN("Invalid staged firmware header length: %" PRIu32, hdr->header_length);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static bool add_overflows_u32(uint32_t a, uint32_t b)
-{
-	return b > (UINT32_MAX - a);
-}
-
-static int firmware_header_validate_bounds(uint32_t image_size, const struct firmware_header *hdr)
-{
-	if ((hdr->start_offset < hdr->header_length) || (hdr->length == 0U)) {
-		return -EINVAL;
-	}
-
-	if (hdr->length > FIRMWARE_SIZE) {
-		LOG_WRN("Staged firmware too large: %" PRIu32 " > %u", hdr->length, FIRMWARE_SIZE);
-		return -EFBIG;
-	}
-
-	if (add_overflows_u32(hdr->start_offset, hdr->length) ||
-	    ((hdr->start_offset + hdr->length) > image_size)) {
-		LOG_WRN("Staged firmware is truncated");
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int firmware_validate_vector_table(uint32_t image_addr, const struct firmware_header *hdr)
-{
-	uint32_t vectors[2];
-	uint32_t initial_sp;
-	uint32_t reset_vector;
-	int ret;
-
-	ret = staged_read(image_addr, hdr->start_offset, vectors, sizeof(vectors));
-	if (ret < 0) {
-		return ret;
-	}
-
-	initial_sp = vectors[0];
-	reset_vector = vectors[1];
-	if ((initial_sp < CONFIG_SRAM_BASE_ADDRESS) ||
-	    (initial_sp >= (CONFIG_SRAM_BASE_ADDRESS + (CONFIG_SRAM_SIZE * 1024U)))) {
-		LOG_WRN("Staged firmware initial SP is outside SRAM: 0x%08" PRIx32, initial_sp);
-		return -ENOEXEC;
-	}
-
-	if (((reset_vector & BIT(0)) == 0U) || ((reset_vector & ~BIT(0)) < FIRMWARE_ADDR) ||
-	    ((reset_vector & ~BIT(0)) >= (FIRMWARE_ADDR + hdr->length))) {
-		LOG_WRN("Staged firmware reset vector is incompatible: 0x%08" PRIx32, reset_vector);
-		return -ENOEXEC;
-	}
-
-	return 0;
-}
-
-static int firmware_validate_crc(uint32_t image_addr, const struct firmware_header *hdr)
-{
-	uint32_t pending;
-	uint32_t offset;
-	uint32_t crc;
-	int ret;
-
-	crc = crc32_ieee(NULL, 0U);
-	pending = hdr->length;
-	offset = hdr->start_offset;
 	while (pending > 0U) {
 		size_t len = MIN(sizeof(buf), pending);
 
 		ret = staged_read(image_addr, offset, buf, len);
 		if (ret < 0) {
-			LOG_ERR("Failed to read staged firmware payload (err %d)", ret);
 			return ret;
 		}
-
 		crc = crc32_ieee_update(crc, buf, len);
 		pending -= len;
 		offset += len;
 	}
 
-	if (crc != hdr->crc) {
-		LOG_WRN("Staged firmware CRC mismatch: got 0x%08" PRIx32 ", expected 0x%08" PRIx32,
-			crc, hdr->crc);
-		return -EIO;
-	}
-
-	return 0;
+	return crc == description->checksum ? 0 : -EBADMSG;
 }
 
 static int firmware_validate_staged(uint32_t image_addr, uint32_t image_size,
-					   struct firmware_header *hdr)
+				    bool require_recovery, struct staged_image *image)
 {
+	struct firmware_description *description = &image->description;
+	uint32_t vectors[2];
+	uint8_t footer[3];
+	uint32_t length;
 	int ret;
 
-	ret = firmware_header_get(image_addr, hdr);
+	if (image_size < sizeof(*description)) {
+		return -EINVAL;
+	}
+	ret = staged_read(image_addr, 0U, description, sizeof(*description));
 	if (ret < 0) {
 		return ret;
 	}
+	if (description->description_length != sizeof(*description) ||
+	    description->firmware_length < FIRMWARE_MIN_SIZE) {
+		return -EINVAL;
+	}
+	length = description->firmware_length;
+	if (length > FIRMWARE_SIZE || length > image_size - sizeof(*description) ||
+	    ROUND_UP(length, FIRMWARE_WRITE_SIZE) > FIRMWARE_SIZE ||
+	    ROUND_UP(length, FIRMWARE_ERASE_SIZE) > FIRMWARE_SIZE) {
+		return -EFBIG;
+	}
 
-	ret = firmware_header_validate_bounds(image_size, hdr);
+	ret = staged_read(image_addr, sizeof(*description), vectors, sizeof(vectors));
 	if (ret < 0) {
 		return ret;
 	}
+	if (!firmware_vectors_valid(vectors, length)) {
+		return -ENOEXEC;
+	}
 
-	ret = firmware_validate_vector_table(image_addr, hdr);
+	ret = staged_read(image_addr, sizeof(*description) + length - sizeof(footer),
+			  footer, sizeof(footer));
 	if (ret < 0) {
 		return ret;
 	}
+	if ((footer[0] & ~FIRMWARE_RECOVERY_FLAG) != 0U ||
+	    footer[1] != CONFIG_PB_FIRMWARE_PLATFORM_ID ||
+	    footer[2] != FIRMWARE_METADATA_VERSION ||
+	    (require_recovery && footer[0] != FIRMWARE_RECOVERY_FLAG)) {
+		return -ENOEXEC;
+	}
+	image->is_recovery = footer[0] == FIRMWARE_RECOVERY_FLAG;
+	return firmware_validate_crc(image_addr, description);
+}
 
-	return firmware_validate_crc(image_addr, hdr);
+int pb_firmware_validate_download(uint32_t received_length)
+{
+	struct staged_image image;
+	struct firmware_description description;
+	int ret;
+
+	if (received_length < sizeof(description)) {
+		return -EINVAL;
+	}
+	if (received_length > SCRATCH_SIZE) {
+		return -EFBIG;
+	}
+	ret = staged_read(SCRATCH_ADDR, 0U, &description, sizeof(description));
+	if (ret < 0) {
+		return ret;
+	}
+	if (description.description_length == sizeof(description) &&
+	    description.firmware_length <= SCRATCH_SIZE - sizeof(description) &&
+	    received_length != sizeof(description) + description.firmware_length) {
+		return -EINVAL;
+	}
+	return firmware_validate_staged(SCRATCH_ADDR, SCRATCH_SIZE, false, &image);
+}
+
+static int firmware_state_read(uint32_t *word)
+{
+	return flash_read(external_flash, BOOT_STATE_ADDR, word, sizeof(*word));
+}
+
+int pb_firmware_check_internal(void)
+{
+	uint32_t word;
+	uint32_t vectors[2];
+	int ret = firmware_state_read(&word);
+
+	if (ret < 0) {
+		return ret;
+	}
+	if (word != UINT32_MAX || pb_bootbit_tst(PB_BOOTBIT_NEW_FW_UPDATE_IN_PROGRESS)) {
+		return -EINPROGRESS;
+	}
+	ret = internal_read(FIRMWARE_ADDR, vectors, sizeof(vectors));
+	if (ret < 0) {
+		return ret;
+	}
+	return firmware_vectors_valid(vectors, FIRMWARE_SIZE) ? 0 : -ENOEXEC;
+}
+
+static int firmware_mark_dirty(void)
+{
+	uint32_t word = 0U;
+	int ret = flash_write(external_flash, BOOT_STATE_ADDR, &word, sizeof(word));
+
+	if (ret < 0) {
+		return ret;
+	}
+	ret = firmware_state_read(&word);
+	if (ret < 0) {
+		return ret;
+	}
+	if (word != 0U) {
+		return -EIO;
+	}
+	pb_bootbit_set(PB_BOOTBIT_NEW_FW_UPDATE_IN_PROGRESS);
+	return 0;
 }
 
 static int firmware_erase_internal(uint32_t length)
 {
-	uint32_t erase_len = ROUND_UP(length, FIRMWARE_ERASE_SIZE);
-
-	if (erase_len > FIRMWARE_SIZE) {
-		return -EFBIG;
-	}
-
-	LOG_INF("Erasing internal firmware flash: %" PRIu32 " bytes", erase_len);
-	return flash_erase(internal_flash, FIRMWARE_ADDR, erase_len);
+	return flash_erase(internal_flash, FIRMWARE_ADDR, ROUND_UP(length, FIRMWARE_ERASE_SIZE));
 }
 
-static int firmware_copy_to_internal(uint32_t image_addr, const struct firmware_header *hdr)
+static int firmware_copy_to_internal(uint32_t image_addr,
+				     const struct firmware_description *description)
 {
-	uint32_t pending = hdr->length;
-	uint32_t src_offset = hdr->start_offset;
+	uint32_t pending = description->firmware_length;
+	uint32_t src_offset = sizeof(*description);
 	uint32_t dst_offset = FIRMWARE_ADDR;
 	int ret;
 
@@ -224,38 +259,29 @@ static int firmware_copy_to_internal(uint32_t image_addr, const struct firmware_
 
 		ret = staged_read(image_addr, src_offset, buf, len);
 		if (ret < 0) {
-			LOG_ERR("Failed to read staged firmware payload (err %d)", ret);
 			return ret;
 		}
-
 		if (write_len != len) {
 			memset(&buf[len], 0xff, write_len - len);
 		}
-
 		ret = flash_write(internal_flash, dst_offset, buf, write_len);
 		if (ret < 0) {
-			LOG_ERR("Failed to write internal firmware flash (err %d)", ret);
 			return ret;
 		}
-
 		pending -= len;
 		src_offset += len;
-		dst_offset += len;
+		dst_offset += write_len;
 	}
-
 	return 0;
 }
 
-static int firmware_validate_internal_crc(const struct firmware_header *hdr)
+static int firmware_validate_internal_crc(const struct firmware_description *description)
 {
-	uint32_t pending;
-	uint32_t offset;
-	uint32_t crc;
+	uint32_t pending = description->firmware_length;
+	uint32_t offset = FIRMWARE_ADDR;
+	uint32_t crc = crc32_ieee(NULL, 0U);
 	int ret;
 
-	crc = crc32_ieee(NULL, 0U);
-	pending = hdr->length;
-	offset = FIRMWARE_ADDR;
 	while (pending > 0U) {
 		size_t len = MIN(sizeof(buf), pending);
 
@@ -263,85 +289,56 @@ static int firmware_validate_internal_crc(const struct firmware_header *hdr)
 		if (ret < 0) {
 			return ret;
 		}
-
 		crc = crc32_ieee_update(crc, buf, len);
 		pending -= len;
 		offset += len;
 	}
+	return crc == description->checksum ? 0 : -EIO;
+}
 
-	if (crc != hdr->crc) {
-		LOG_ERR("Internal firmware CRC mismatch after copy: got 0x%08" PRIx32
-			", expected 0x%08" PRIx32,
-			crc, hdr->crc);
+static int firmware_install_staged(uint32_t image_addr, const struct staged_image *image,
+				   bool *marked, bool *verified)
+{
+	uint32_t word;
+	int ret = firmware_mark_dirty();
+
+	if (ret < 0) {
+		return ret;
+	}
+	if (marked != NULL) {
+		*marked = true;
+	}
+	ret = firmware_erase_internal(image->description.firmware_length);
+	if (ret < 0) {
+		return ret;
+	}
+	ret = firmware_copy_to_internal(image_addr, &image->description);
+	if (ret < 0) {
+		return ret;
+	}
+	ret = firmware_validate_internal_crc(&image->description);
+	if (ret < 0) {
+		return ret;
+	}
+	if (verified != NULL) {
+		*verified = true;
+	}
+	ret = flash_erase(external_flash, BOOT_STATE_ADDR, BOOT_STATE_SIZE);
+	if (ret < 0) {
+		return ret;
+	}
+	ret = firmware_state_read(&word);
+	if (ret < 0) {
+		return ret;
+	}
+	if (word != UINT32_MAX) {
 		return -EIO;
 	}
-
-	return 0;
-}
-
-static int firmware_install_staged(uint32_t image_addr, uint32_t image_size)
-{
-	struct firmware_header hdr;
-	int ret;
-
-	ret = firmware_validate_staged(image_addr, image_size, &hdr);
-	if (ret < 0) {
-		return ret;
-	}
-
-	pb_bootbit_set(PB_BOOTBIT_NEW_FW_UPDATE_IN_PROGRESS);
-
-	ret = firmware_erase_internal(hdr.length);
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = firmware_copy_to_internal(image_addr, &hdr);
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = firmware_validate_internal_crc(&hdr);
-	if (ret < 0) {
-		return ret;
-	}
-
 	pb_bootbit_clr(PB_BOOTBIT_NEW_FW_UPDATE_IN_PROGRESS);
-	pb_bootbit_clr(PB_BOOTBIT_FW_START_FAIL_STRIKE_ONE);
-	pb_bootbit_clr(PB_BOOTBIT_FW_START_FAIL_STRIKE_TWO);
-	pb_bootbit_clr(PB_BOOTBIT_RECOVERY_LOAD_FAIL_STRIKE_ONE);
-	pb_bootbit_clr(PB_BOOTBIT_RECOVERY_LOAD_FAIL_STRIKE_TWO);
+	pb_bootbit_fw_fail_cnt_set(0U);
+	pb_bootbit_prf_fail_cnt_set(0U);
+	pb_bootbit_reset_loop_cnt_set(0U);
 	pb_bootbit_set(PB_BOOTBIT_NEW_FW_INSTALLED);
-
-	return 0;
-}
-
-static int firmware_install_if_requested(enum pb_bootbit request_bit, uint32_t image_addr,
-						 uint32_t image_size)
-{
-	int ret;
-
-	if (!pb_bootbit_tst(request_bit)) {
-		return 0;
-	}
-
-	if (pb_bootbit_tst(PB_BOOTBIT_NEW_FW_UPDATE_IN_PROGRESS)) {
-		LOG_ERR("Previous firmware update failed before completion; leaving internal flash untouched");
-		pb_bootbit_clr(PB_BOOTBIT_NEW_FW_UPDATE_IN_PROGRESS);
-		pb_bootbit_clr(request_bit);
-		return 0;
-	}
-
-	LOG_INF("Installing staged firmware from external flash @ 0x%08" PRIx32, image_addr);
-	ret = firmware_install_staged(image_addr, image_size);
-	if (ret < 0) {
-		LOG_ERR("Staged firmware install failed before completion (err %d)", ret);
-		pb_bootbit_clr(PB_BOOTBIT_NEW_FW_UPDATE_IN_PROGRESS);
-		pb_bootbit_clr(request_bit);
-		return ret;
-	}
-
-	pb_bootbit_clr(request_bit);
 	return 0;
 }
 #endif /* CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE */
@@ -431,15 +428,20 @@ int pb_firmware_load_prf(void)
 {
 #ifdef CONFIG_PB_FIRMWARE_NRF52
 #ifdef CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE
-	int ret;
+	struct staged_image image;
+	int ret = firmware_validate_staged(SAFE_FIRMWARE_ADDR, SAFE_FIRMWARE_SIZE, true, &image);
 
-	ret = firmware_install_staged(SAFE_FIRMWARE_ADDR, SAFE_FIRMWARE_SIZE);
 	if (ret < 0) {
 		return ret;
 	}
-
+	ret = firmware_install_staged(SAFE_FIRMWARE_ADDR, &image, NULL, NULL);
+	if (ret < 0) {
+		return ret;
+	}
+	pb_bootbit_clr(PB_BOOTBIT_NEW_FW_AVAILABLE);
 	pb_bootbit_prf_starting_set();
-	return pb_firmware_load();
+	pb_fwjump(CONFIG_FLASH_BASE_ADDRESS + FIRMWARE_ADDR);
+	return 0;
 #else
 	return -ENOTSUP;
 #endif /* CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE */
@@ -475,16 +477,48 @@ int pb_firmware_load(void)
 #ifdef CONFIG_PB_FIRMWARE_NRF52
 	uint32_t firmware_load_address = CONFIG_FLASH_BASE_ADDRESS + FIRMWARE_ADDR;
 #ifdef CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE
+	struct staged_image image;
+	bool marked = false;
+	bool verified = false;
 	int ret;
 
-	ret = firmware_install_if_requested(PB_BOOTBIT_NEW_PRF_AVAILABLE, PRF_ADDR, PRF_SIZE);
-	if (ret < 0) {
-		return ret;
-	}
-
-	ret = firmware_install_if_requested(PB_BOOTBIT_NEW_FW_AVAILABLE, SCRATCH_ADDR, SCRATCH_SIZE);
-	if (ret < 0) {
-		return ret;
+	if (pb_bootbit_tst(PB_BOOTBIT_NEW_FW_AVAILABLE)) {
+		ret = firmware_validate_staged(SCRATCH_ADDR, SCRATCH_SIZE, false, &image);
+		if (ret < 0) {
+			if (ret != -EINVAL && ret != -EFBIG && ret != -ENOEXEC && ret != -EBADMSG) {
+				return ret;
+			}
+			pb_bootbit_clr(PB_BOOTBIT_NEW_FW_AVAILABLE);
+			ret = pb_firmware_check_internal();
+			if (ret == -EINPROGRESS || ret == -ENOEXEC) {
+				return pb_firmware_load_prf();
+			}
+			if (ret < 0) {
+				return ret;
+			}
+		} else {
+			ret = firmware_install_staged(SCRATCH_ADDR, &image, &marked, &verified);
+			if (ret < 0) {
+				if (verified) {
+					return ret;
+				}
+				return marked ? pb_firmware_load_prf() : ret;
+			}
+			pb_bootbit_clr(PB_BOOTBIT_NEW_FW_AVAILABLE);
+			if (image.is_recovery) {
+				pb_bootbit_prf_starting_set();
+			} else {
+				pb_bootbit_clr(PB_BOOTBIT_RECOVERY_START_IN_PROGRESS);
+			}
+		}
+	} else {
+		ret = pb_firmware_check_internal();
+		if (ret == -EINPROGRESS || ret == -ENOEXEC) {
+			return pb_firmware_load_prf();
+		}
+		if (ret < 0) {
+			return ret;
+		}
 	}
 #endif /* CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE */
 

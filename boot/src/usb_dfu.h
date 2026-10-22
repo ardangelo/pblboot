@@ -27,11 +27,12 @@ int pb_usb_dfu_init(void);
 bool pb_usb_dfu_requested(void);
 
 /**
- * @brief Run USB DFU until manifest-triggered reset or timeout.
+ * @brief Run USB DFU until manifest-triggered reset or, when allowed, timeout.
  *
- * @retval 0 if DFU timed out or stopped cleanly and boot may continue.
+ * @param allow_timeout Allow idle/transfer timeouts only for healthy internal firmware.
+ * @retval 0 if DFU timed out and boot may continue.
  * @retval -errno negative error code on setup failure.
  */
-int pb_usb_dfu_run(void);
+int pb_usb_dfu_run(bool allow_timeout);
 
 #endif /* BOOT_SRC_USB_DFU_H_ */

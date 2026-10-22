@@ -13,4 +13,5 @@
 	KEEP(*(.pbversion))
 }
 
+ASSERT(__rom_region_start + _flash_used <= ADDR(.pbversion), "ROM load image overlaps version region")
 ASSERT(__rom_region_end <= ADDR(.pbversion), "ROM content overlaps version region")

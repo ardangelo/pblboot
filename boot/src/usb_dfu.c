@@ -6,6 +6,7 @@
 #include "usb_dfu.h"
 
 #include "buttons.h"
+#include "firmware.h"
 #include "watchdog.h"
 
 #include <errno.h>
@@ -62,6 +63,8 @@ static uint32_t bytes_received;
 static int64_t last_activity_ms;
 static bool transfer_active;
 static bool manifest_complete;
+static bool short_block_received;
+static bool transfer_failed;
 
 static const tusb_desc_device_t desc_device = {
 	.bLength = sizeof(tusb_desc_device_t),
@@ -159,6 +162,8 @@ static void dfu_state_reset(void)
 	bytes_received = 0U;
 	transfer_active = false;
 	manifest_complete = false;
+	short_block_received = false;
+	transfer_failed = false;
 	last_activity_ms = k_uptime_get();
 }
 
@@ -222,51 +227,79 @@ static int dfu_write_block(uint16_t block, const uint8_t *data, uint32_t size)
 	uint32_t offset;
 	int ret;
 
+	if (block == 0U && size != 0U) {
+		dfu_state_reset();
+	}
+	if (transfer_failed || block != expected_block) {
+		LOG_WRN("Out-of-order DFU block: got %u expected %u", block, expected_block);
+		ret = -EINVAL;
+		goto fail;
+	}
 	if (size == 0U) {
 		if (bytes_received == 0U) {
-			return -EINVAL;
+			ret = -EINVAL;
+			goto fail;
 		}
 		return 0;
 	}
-
-	if (block == 0U) {
-		dfu_state_reset();
-	} else if (block != expected_block) {
-		LOG_WRN("Out-of-order DFU block: got %u expected %u", block, expected_block);
-		return -EINVAL;
+	if (short_block_received) {
+		ret = -EINVAL;
+		goto fail;
+	}
+	if (size > DFU_TRANSFER_SIZE) {
+		ret = -EFBIG;
+		goto fail;
 	}
 
 	offset = (uint32_t)block * DFU_TRANSFER_SIZE;
-	if ((offset > SCRATCH_SIZE) || (size > (SCRATCH_SIZE - offset))) {
+	if (offset != bytes_received) {
+		ret = -EINVAL;
+		goto fail;
+	}
+	if (offset > SCRATCH_SIZE || size > SCRATCH_SIZE - offset) {
 		LOG_WRN("DFU write exceeds scratch partition: block %u len %u", block, size);
-		return -EFBIG;
+		ret = -EFBIG;
+		goto fail;
 	}
 
+	if (block == 0U) {
+		/* Scratch has a new owner only when its first erase is accepted. */
+		pb_bootbit_clr(PB_BOOTBIT_NEW_FW_AVAILABLE);
+		pb_bootbit_clr(PB_BOOTBIT_NEW_PRF_AVAILABLE);
+	}
 	ret = dfu_erase_for_range(offset, size);
 	if (ret < 0) {
-		return ret;
+		goto fail;
 	}
 
 	ret = dfu_flash_write(offset, data, size);
 	if (ret < 0) {
 		LOG_ERR("Failed to write DFU scratch block %u (err %d)", block, ret);
-		return ret;
+		goto fail;
 	}
 
 	bytes_received += size;
 	expected_block = block + 1U;
+	short_block_received = size < DFU_TRANSFER_SIZE;
 	transfer_active = true;
 	last_activity_ms = k_uptime_get();
 	(void)pb_watchdog_feed();
-
 	return 0;
+
+fail:
+	transfer_failed = true;
+	return ret;
 }
 
 static uint8_t dfu_status_from_error(int err)
 {
 	if (err == -EFBIG) {
 		return DFU_STATUS_ERR_ADDRESS;
-	} else if (err == -EIO) {
+	}
+	if (err == -EINVAL || err == -ENOEXEC || err == -EBADMSG) {
+		return DFU_STATUS_ERR_FILE;
+	}
+	if (err == -EIO) {
 		return DFU_STATUS_ERR_WRITE;
 	}
 
@@ -293,7 +326,7 @@ bool pb_usb_dfu_requested(void)
 	return pb_buttons_dfu_requested();
 }
 
-int pb_usb_dfu_run(void)
+int pb_usb_dfu_run(bool allow_timeout)
 {
 	const tusb_rhport_init_t dev_init = {
 		.role = TUSB_ROLE_DEVICE,
@@ -318,12 +351,12 @@ int pb_usb_dfu_run(void)
 	pb_tinyusb_nrf52_start();
 
 	while (!manifest_complete) {
+		tud_task();
 		int64_t now = k_uptime_get();
 		int64_t timeout_ms = transfer_active ? CONFIG_PB_USB_DFU_TRANSFER_TIMEOUT_MS :
 						    CONFIG_PB_USB_DFU_IDLE_TIMEOUT_MS;
 
-		tud_task();
-		if ((now - last_activity_ms) > timeout_ms) {
+		if (allow_timeout && (now - last_activity_ms) > timeout_ms) {
 			LOG_INF("USB DFU timeout; continuing normal boot");
 			break;
 		}
@@ -338,7 +371,13 @@ int pb_usb_dfu_run(void)
 		return 0;
 	}
 
-	k_sleep(K_MSEC(100));
+	/* dfu-util waits another second before its final status poll and USB reset. */
+	const int64_t reboot_at = k_uptime_get() + CONFIG_PB_USB_DFU_POLLTIMEOUT_MS + 2000;
+	while (k_uptime_get() < reboot_at) {
+		tud_task();
+		(void)pb_watchdog_feed();
+		k_sleep(K_MSEC(1));
+	}
 	sys_reboot(SYS_REBOOT_WARM);
 
 	return 0;
@@ -361,10 +400,19 @@ void tud_dfu_download_cb(uint8_t alt, uint16_t block_num, uint8_t const *data, u
 
 void tud_dfu_manifest_cb(uint8_t alt)
 {
+	int ret;
+
 	ARG_UNUSED(alt);
 
-	if (bytes_received == 0U) {
+	if (transfer_failed || bytes_received == 0U) {
 		tud_dfu_finish_flashing(DFU_STATUS_ERR_FILE);
+		return;
+	}
+
+	ret = pb_firmware_validate_download(bytes_received);
+	if (ret < 0) {
+		transfer_failed = true;
+		tud_dfu_finish_flashing(dfu_status_from_error(ret));
 		return;
 	}
 

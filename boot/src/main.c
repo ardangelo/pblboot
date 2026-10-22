@@ -10,6 +10,7 @@
 #include "watchdog.h"
 #include "usb_dfu.h"
 
+#include <errno.h>
 #include <inttypes.h>
 
 #include <zephyr/logging/log.h>
@@ -19,6 +20,18 @@
 #include <app_version.h>
 
 LOG_MODULE_REGISTER(pblboot, CONFIG_PBLBOOT_LOG_LEVEL);
+
+#ifdef CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE
+static void boot_recovery_dfu(int error)
+{
+	LOG_ERR("No safe firmware boot (err %d)", error);
+#ifdef CONFIG_PB_USB_DFU
+	error = pb_usb_dfu_run(false);
+	LOG_ERR("Recovery DFU ended (err %d)", error);
+#endif
+	pb_panic(PB_PANIC_REASON_FW_LOAD_FAIL(error));
+}
+#endif
 
 int main(void)
 {
@@ -60,7 +73,11 @@ int main(void)
 
 #ifdef CONFIG_PB_USB_DFU
 	if (pb_usb_dfu_requested()) {
-		ret = pb_usb_dfu_run();
+#ifdef CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE
+		ret = pb_usb_dfu_run(pb_firmware_check_internal() == 0);
+#else
+		ret = pb_usb_dfu_run(true);
+#endif
 		if (ret < 0) {
 			LOG_ERR("USB DFU failed (err %d)", ret);
 			pb_panic(PB_PANIC_REASON_INIT_FAIL);
@@ -75,6 +92,32 @@ int main(void)
 		pb_panic(PB_PANIC_REASON_BATTERY_LOW);
 	}
 #endif /* CONFIG_PB_CHARGER */
+
+#ifdef CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE
+	/* Service explicit requests and interrupted copies before strike bookkeeping. */
+	ret = pb_firmware_check_internal();
+	if (ret < 0 && ret != -EINPROGRESS && ret != -ENOEXEC) {
+		boot_recovery_dfu(ret);
+	}
+	prf_requested = pb_bootbit_force_prf_tst_and_clr();
+	if (!prf_requested) {
+		prf_requested = pb_buttons_prf_requested();
+	}
+	if (prf_requested || (ret < 0 && !pb_bootbit_tst(PB_BOOTBIT_NEW_FW_AVAILABLE))) {
+		ret = pb_firmware_load_prf();
+		if (ret < 0) {
+			boot_recovery_dfu(ret);
+		}
+		return 0;
+	}
+	if (pb_bootbit_tst(PB_BOOTBIT_NEW_FW_AVAILABLE)) {
+		ret = pb_firmware_load();
+		if (ret < 0) {
+			boot_recovery_dfu(ret);
+		}
+		return 0;
+	}
+#endif
 
 	/* reset loop counter handling */
 	rst_loop_cnt = pb_bootbit_reset_loop_cnt_get();
@@ -124,6 +167,7 @@ int main(void)
 		}
 	}
 
+#ifndef CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE
 	/* prf manual requests */
 	if (!prf_requested) {
 		if (pb_bootbit_force_prf_tst_and_clr()) {
@@ -133,6 +177,7 @@ int main(void)
 			prf_requested = true;
 		}
 	}
+#endif
 
 	/* one last feed */
 	(void)pb_watchdog_feed();
@@ -141,7 +186,11 @@ int main(void)
 		ret = pb_firmware_load_prf();
 		if (ret < 0) {
 			LOG_ERR("Failed to load PRF (err %d)", ret);
+#ifdef CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE
+			boot_recovery_dfu(ret);
+#else
 			pb_panic(PB_PANIC_REASON_PRF_LOAD_FAIL(ret));
+#endif
 		}
 	}
 
@@ -149,7 +198,11 @@ int main(void)
 	ret = pb_firmware_load();
 	if (ret < 0) {
 		LOG_ERR("Failed to load firmware (err %d)", ret);
+#ifdef CONFIG_PB_FIRMWARE_NRF52_STAGED_UPDATE
+		boot_recovery_dfu(ret);
+#else
 		pb_panic(PB_PANIC_REASON_FW_LOAD_FAIL(ret));
+#endif
 	}
 
 	return 0;

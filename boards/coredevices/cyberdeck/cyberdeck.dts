@@ -135,17 +135,17 @@
 
 			safe_firmware_partition: partition@0 {
 				label = "safe-firmware";
-				reg = <0x00000000 DT_SIZE_K(512)>;
+				reg = <0x00000000 0x000ff000>;
 			};
 
-			firmware_scratch_partition: partition@80000 {
+			firmware_scratch_partition: partition@100000 {
 				label = "firmware-scratch";
-				reg = <0x00080000 DT_SIZE_K(1024)>;
+				reg = <0x00100000 0x00100000>;
 			};
 
-			prf_partition: partition@180000 {
-				label = "prf";
-				reg = <0x00180000 DT_SIZE_K(512)>;
+			boot_state_partition: partition@1dd0000 {
+				label = "boot-state";
+				reg = <0x01dd0000 0x00001000>;
 			};
 		};
 	};

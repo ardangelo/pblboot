@@ -13,7 +13,7 @@
 		pb,external-flash = &w25q256jw;
 		pb,firmware-scratch = &firmware_scratch_partition;
 		pb,safe-firmware = &safe_firmware_partition;
-		pb,prf = &prf_partition;
+		pb,boot-state = &boot_state_partition;
 
 		/* buttons */
 		pb,btn-back = &btn_back;

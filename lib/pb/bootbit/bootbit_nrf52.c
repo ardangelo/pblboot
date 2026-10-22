@@ -21,6 +21,7 @@ LOG_MODULE_REGISTER(pb_bootbit, CONFIG_PB_BOOTBIT_LOG_LEVEL);
 #define NRF_RETAINED_WORDS        (256U / sizeof(uint32_t))
 
 #define RTC_BKP_BOOTBIT_DR          0U
+#define RTC_BKP_BUILD_TIMESTAMP_DR  2U
 #define NRF_RETAINED_REGISTER_CRC   31U
 #define PB_BOOTBIT_INITIALIZED_MASK  BIT(PB_BOOTBIT_INITIALIZED)
 
@@ -122,6 +123,7 @@ void pb_bootbit_init(void)
 		LOG_DBG("Boot bits not initialized, initializing now");
 		retained_write(RTC_BKP_BOOTBIT_DR, PB_BOOTBIT_INITIALIZED_MASK);
 	}
+	retained_write(RTC_BKP_BUILD_TIMESTAMP_DR, PB_BUILD_TIMESTAMP);
 
 	LOG_DBG("Boot bits: 0x%08" PRIx32, retained_read(RTC_BKP_BOOTBIT_DR));
 }

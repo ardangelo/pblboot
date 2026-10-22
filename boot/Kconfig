@@ -33,8 +33,8 @@ config PB_USB_DFU
 	depends on PB_FIRMWARE_NRF52_STAGED_UPDATE
 	depends on SOC_SERIES_NRF52X
 	help
-	  Enable TinyUSB DFU that writes pblboot-headered payloads to
-	  external firmware scratch and requests installation on reboot.
+	  Enable TinyUSB DFU for 12-byte-descriptor firmware images in
+	  external scratch flash.
 
 config PB_USB_DFU_POLLTIMEOUT_MS
 	int "USB DFU poll timeout (ms)"
@@ -91,8 +91,17 @@ config PB_FIRMWARE_NRF52_STAGED_UPDATE
 	bool "Enable staged external-flash updates for NRF52 firmware"
 	depends on PB_FIRMWARE_NRF52
 	help
-	  Validate pblboot-headered firmware images in external flash and copy
-	  verified payloads into the fixed internal NRF52 firmware partition.
+	  Validate 12-byte-descriptor firmware images in external flash and
+	  copy verified payloads into the fixed internal NRF52 firmware partition.
+
+config PB_FIRMWARE_PLATFORM_ID
+	int "Staged NRF52 firmware platform ID"
+	depends on PB_FIRMWARE_NRF52_STAGED_UPDATE
+	range 0 255
+	default 0
+	help
+	  Expected hardware platform in the staged firmware metadata footer.
+
 config PB_VBAT_MIN_BOOT_MV
 	int "Minimal battery level to allow boot (mV)"
 	default 3300
