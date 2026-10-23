@@ -20,8 +20,12 @@ Zephyr modules will be cloned. Run the following command:
 ```shell
 west init -m git@github.com:coredevices/pblboot --mr main pblboot
 cd pblboot
+git submodule update --init
 west update
 ```
+
+Git submodules provide TinyUSB for Cyberdeck USB DFU. `west update` fetches
+the Zephyr projects but does not initialize these submodules.
 
 ### Building and running
 
